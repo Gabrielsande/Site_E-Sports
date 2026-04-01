@@ -1,251 +1,252 @@
 <?php
 // dashboard.php — FragZone
-require_once 'verifica_login.php';
-require_once 'conexao.php';
-require_once 'funcoes.php';
+require_once __DIR__ . '/../include/verifica_login.php';
+require_once __DIR__ . '/../include/conexao.php';
+require_once __DIR__ . '/../include/funcoes.php';
 
-// Stats do usuário
-$stmt = $pdo->prepare("SELECT COUNT(*) AS total FROM noticias WHERE autor = ?");
-$stmt->execute([$_SESSION['usuario_id']]);
-$total = $stmt->fetch()['total'];
+// Dados do usuário
+$stmtU = $pdo->prepare("SELECT * FROM usuarios WHERE id = ?");
+$stmtU->execute([$_SESSION['usuario_id']]);
+$usuario = $stmtU->fetch();
 
-// Notícia mais recente
-$stmt2 = $pdo->prepare("SELECT data FROM noticias WHERE autor = ? ORDER BY data DESC LIMIT 1");
-$stmt2->execute([$_SESSION['usuario_id']]);
-$ultima = $stmt2->fetch();
+// Total de notícias
+$stmtT = $pdo->prepare("SELECT COUNT(*) AS total FROM noticias WHERE autor = ?");
+$stmtT->execute([$_SESSION['usuario_id']]);
+$total = (int)$stmtT->fetch()['total'];
+
+// Última publicação
+$stmtL = $pdo->prepare("SELECT data FROM noticias WHERE autor = ? ORDER BY data DESC LIMIT 1");
+$stmtL->execute([$_SESSION['usuario_id']]);
+$ultima = $stmtL->fetch();
 
 // Notícias do usuário
-$stmt3 = $pdo->prepare("SELECT * FROM noticias WHERE autor = ? ORDER BY data DESC");
-$stmt3->execute([$_SESSION['usuario_id']]);
-$noticias = $stmt3->fetchAll();
-
-// Dados do usuário para o form
-$stmt4 = $pdo->prepare("SELECT * FROM usuarios WHERE id = ?");
-$stmt4->execute([$_SESSION['usuario_id']]);
-$usuario = $stmt4->fetch();
+$stmtN = $pdo->prepare("SELECT * FROM noticias WHERE autor = ? ORDER BY data DESC");
+$stmtN->execute([$_SESSION['usuario_id']]);
+$noticias = $stmtN->fetchAll();
 
 // Aba ativa
-$aba = $_GET['aba'] ?? 'noticias';
+$aba = in_array($_GET['aba'] ?? '', ['noticias','perfil']) ? $_GET['aba'] : 'noticias';
 
-// Processar edição de dados
+// ── Processar edição de perfil ──────────────────────────
 $erro = ''; $sucesso = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'editar_perfil') {
+    $nome  = sanitizar($_POST['nome']  ?? '');
+    $email = sanitizar($_POST['email'] ?? '');
+    $senha = $_POST['senha']           ?? '';
+    $conf  = $_POST['conf_senha']      ?? '';
 
-    if ($_POST['acao'] === 'editar_perfil') {
-        $nome  = sanitizar($_POST['nome'] ?? '');
-        $email = sanitizar($_POST['email'] ?? '');
-        $senha = $_POST['senha'] ?? '';
-        $conf  = $_POST['confirmar_senha'] ?? '';
-
-        if (!$nome || !$email) {
-            $erro = 'Nome e e-mail são obrigatórios.';
-        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $erro = 'E-mail inválido.';
+    if (!$nome || !$email) {
+        $erro = 'Nome e e-mail são obrigatórios.';
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $erro = 'E-mail inválido.';
+    } elseif ($senha && strlen($senha) < 6) {
+        $erro = 'Nova senha deve ter no mínimo 6 caracteres.';
+    } elseif ($senha && $senha !== $conf) {
+        $erro = 'As senhas não coincidem.';
+    } else {
+        $chk = $pdo->prepare("SELECT id FROM usuarios WHERE email = ? AND id != ?");
+        $chk->execute([$email, $_SESSION['usuario_id']]);
+        if ($chk->fetch()) {
+            $erro = 'Este e-mail já pertence a outra conta.';
         } else {
-            $check = $pdo->prepare("SELECT id FROM usuarios WHERE email = ? AND id != ?");
-            $check->execute([$email, $_SESSION['usuario_id']]);
-            if ($check->fetch()) {
-                $erro = 'Este e-mail já está em uso.';
-            } elseif ($senha && strlen($senha) < 6) {
-                $erro = 'Senha deve ter no mínimo 6 caracteres.';
-            } elseif ($senha && $senha !== $conf) {
-                $erro = 'Senhas não coincidem.';
+            if ($senha) {
+                $hash = password_hash($senha, PASSWORD_DEFAULT);
+                $pdo->prepare("UPDATE usuarios SET nome=?, email=?, senha=? WHERE id=?")
+                    ->execute([$nome, $email, $hash, $_SESSION['usuario_id']]);
             } else {
-                if ($senha) {
-                    $hash = password_hash($senha, PASSWORD_DEFAULT);
-                    $upd = $pdo->prepare("UPDATE usuarios SET nome=?, email=?, senha=? WHERE id=?");
-                    $upd->execute([$nome, $email, $hash, $_SESSION['usuario_id']]);
-                } else {
-                    $upd = $pdo->prepare("UPDATE usuarios SET nome=?, email=? WHERE id=?");
-                    $upd->execute([$nome, $email, $_SESSION['usuario_id']]);
-                }
-                $_SESSION['usuario_nome'] = $nome;
-                $sucesso = 'Perfil atualizado com sucesso!';
-                $stmt4->execute([$_SESSION['usuario_id']]);
-                $usuario = $stmt4->fetch();
+                $pdo->prepare("UPDATE usuarios SET nome=?, email=? WHERE id=?")
+                    ->execute([$nome, $email, $_SESSION['usuario_id']]);
             }
+            $_SESSION['usuario_nome'] = $nome;
+            $sucesso = 'Dados atualizados com sucesso!';
+            $stmtU->execute([$_SESSION['usuario_id']]);
+            $usuario = $stmtU->fetch();
         }
-        $aba = 'perfil';
     }
+    $aba = 'perfil';
 }
+
+// Inicial do nome para o avatar
+$inicial = mb_strtoupper(mb_substr($usuario['nome'], 0, 1));
+
+$page_title = 'Painel';
+include '../include/header.php';
 ?>
-<!DOCTYPE html>
-<html lang="pt-br" data-theme="dark">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel — FragZone</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
 
-<?php include 'header.php'; ?>
-
+<div class="dash-page">
 <div class="container">
 
     <!-- Stats -->
     <div class="dash-stats">
-        <div class="stat-box">
+        <div class="stat-card">
             <span class="stat-number"><?= $total ?></span>
-            <span class="stat-label">Notícias</span>
+            <span class="stat-label">Publicações</span>
         </div>
-        <div class="stat-box">
-            <span class="stat-number"><?= $ultima ? date('d', strtotime($ultima['data'])) : '—' ?></span>
-            <span class="stat-label">Último post</span>
+        <div class="stat-card">
+            <span class="stat-number"><?= $ultima ? formatar_data_curta($ultima['data']) : '—' ?></span>
+            <span class="stat-label">Última publicação</span>
         </div>
-        <div class="stat-box">
-            <span class="stat-number">🟢</span>
-            <span class="stat-label">Online</span>
+        <div class="stat-card">
+            <span class="stat-number" style="font-size:1.6rem">🟢</span>
+            <span class="stat-label">Status</span>
         </div>
     </div>
 
     <div class="dash-layout">
 
-        <!-- Sidebar -->
+        <!-- ── Sidebar ── -->
         <aside class="dash-sidebar">
-            <div class="dash-profile">
-                <span class="dash-avatar">👾</span>
-                <div class="dash-name"><?= sanitizar($_SESSION['usuario_nome']) ?></div>
-                <div class="dash-role">// Jornalista</div>
+            <div class="dash-profile-box">
+                <div class="dash-avatar"><?= $inicial ?></div>
+                <div class="dash-profile-name"><?= sanitizar($usuario['nome']) ?></div>
+                <div class="dash-profile-role">Jornalista</div>
             </div>
-            <ul class="dash-menu">
-                <li>
-                    <a href="dashboard.php?aba=noticias" class="<?= $aba === 'noticias' ? 'active' : '' ?>">
-                        📰 Minhas Notícias
-                    </a>
-                </li>
-                <li>
-                    <a href="dashboard.php?aba=perfil" class="<?= $aba === 'perfil' ? 'active' : '' ?>">
-                        👤 Editar Perfil
-                    </a>
-                </li>
-                <li>
-                    <a href="nova_noticia.php">✏️ Nova Notícia</a>
-                </li>
-                <li>
-                    <a href="index.php">🏠 Ver Portal</a>
-                </li>
-                <li>
-                    <a href="logout.php" style="color: var(--accent3)">🚪 Sair</a>
-                </li>
-            </ul>
+
+            <nav class="dash-nav">
+                <a href="../admin/dashboard.php?aba=noticias"
+                   class="dash-nav-item <?= $aba === 'noticias' ? 'active' : '' ?>">
+                    📰 Minhas Notícias
+                </a>
+                <a href="../admin/dashboard.php?aba=perfil"
+                   class="dash-nav-item <?= $aba === 'perfil' ? 'active' : '' ?>">
+                    👤 Editar Perfil
+                </a>
+                <div class="dash-nav-sep"></div>
+                <a href="../admin/nova_noticia.php" class="dash-nav-item">✏️ Nova Notícia</a>
+                <a href="../public/index.php"        class="dash-nav-item">🏠 Ver Portal</a>
+                <div class="dash-nav-sep"></div>
+                <a href="../admin/excluir_usuario.php" class="dash-nav-item danger"
+                   onclick="return confirm('Excluir sua conta permanentemente?')">
+                   🗑️ Excluir Conta
+                </a>
+                <a href="../admin/logout.php" class="dash-nav-item danger">🚪 Sair</a>
+            </nav>
         </aside>
 
-        <!-- Main -->
+        <!-- ── Main ── -->
         <main>
 
             <?php if ($aba === 'noticias'): ?>
-            <!-- ABA: Notícias -->
-            <div class="dash-header-row">
-                <div class="section-title" style="margin-bottom:0">Minhas Notícias</div>
-                <a href="nova_noticia.php" class="btn btn-primary">+ Nova Notícia</a>
-            </div>
-
-            <?php if (empty($noticias)): ?>
-                <div class="empty-state">
-                    <span class="icon">📭</span>
-                    <p>Você ainda não publicou nenhuma notícia.<br>Clique em "Nova Notícia" para começar!</p>
+            <!-- Painel de notícias -->
+            <div class="dash-main-card">
+                <div class="dash-main-header">
+                    <h2>Minhas Notícias</h2>
+                    <a href="../admin/nova_noticia.php" class="btn btn-primary btn-sm">+ Nova Notícia</a>
                 </div>
-            <?php else: ?>
-            <div class="table-box">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Título</th>
-                            <th>Data</th>
-                            <th>Imagem</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($noticias as $n): ?>
-                        <tr>
-                            <td style="color:var(--muted)"><?= $n['id'] ?></td>
-                            <td>
-                                <a href="noticia.php?id=<?= $n['id'] ?>" style="color:var(--text)">
-                                    <?= sanitizar(mb_strimwidth($n['titulo'], 0, 50, '...')) ?>
-                                </a>
-                            </td>
-                            <td style="font-family:'VT323',monospace; font-size:1rem;">
-                                <?= formatar_data($n['data']) ?>
-                            </td>
-                            <td><?= $n['imagem'] ? '✅' : '—' ?></td>
-                            <td>
-                                <div class="td-actions">
-                                    <a href="editar_noticia.php?id=<?= $n['id'] ?>" class="btn btn-ghost btn-sm">✏️</a>
-                                    <a href="excluir_noticia.php?id=<?= $n['id'] ?>"
-                                       class="btn btn-danger btn-sm"
-                                       onclick="return confirm('Excluir esta notícia?')">🗑️</a>
-                                </div>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+                <div class="dash-main-body">
+                    <?php if (empty($noticias)): ?>
+                        <div class="empty-state">
+                            <span class="empty-icon">📭</span>
+                            <h3>Nenhuma notícia publicada</h3>
+                            <p>Clique em "Nova Notícia" para começar a publicar.</p>
+                            <a href="../admin/nova_noticia.php" class="btn btn-primary">Publicar primeira notícia</a>
+                        </div>
+                    <?php else: ?>
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Título</th>
+                                        <th>Data</th>
+                                        <th>Imagem</th>
+                                        <th>Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($noticias as $n): ?>
+                                    <tr>
+                                        <td style="color:var(--text-3); font-size:.75rem"><?= $n['id'] ?></td>
+                                        <td>
+                                            <a href="../public/noticia.php?id=<?= $n['id'] ?>" style="color:var(--text); font-weight:500">
+                                                <?= sanitizar(mb_strimwidth($n['titulo'], 0, 55, '…')) ?>
+                                            </a>
+                                        </td>
+                                        <td style="white-space:nowrap; color:var(--text-3)">
+                                            <?= formatar_data_curta($n['data']) ?>
+                                        </td>
+                                        <td><?= $n['imagem'] ? '<span style="color:#27ae60">✔ Sim</span>' : '<span style="color:var(--text-3)">—</span>' ?></td>
+                                        <td>
+                                            <div class="td-actions">
+                                                <a href="../admin/editar_noticia.php?id=<?= $n['id'] ?>" class="btn btn-ghost btn-sm">Editar</a>
+                                                <a href="../admin/excluir_noticia.php?id=<?= $n['id'] ?>"
+                                                   class="btn btn-danger btn-sm"
+                                                   onclick="return confirm('Excluir esta notícia?')">Excluir</a>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+                </div>
             </div>
-            <?php endif; ?>
 
             <?php elseif ($aba === 'perfil'): ?>
-            <!-- ABA: Editar Perfil -->
-            <div class="section-title">Editar Perfil</div>
+            <!-- Painel de perfil -->
+            <div class="dash-main-card">
+                <div class="dash-main-header">
+                    <h2>Editar Perfil</h2>
+                </div>
+                <div class="dash-main-body">
 
-            <div class="form-wrap wide" style="margin: 0;">
-                <h2>👤 Dados do Jornalista</h2>
+                    <?php if ($erro): ?>
+                        <div class="alert alert-error">⚠ <?= $erro ?></div>
+                    <?php endif; ?>
+                    <?php if ($sucesso): ?>
+                        <div class="alert alert-success">✔ <?= $sucesso ?></div>
+                    <?php endif; ?>
 
-                <?php if ($erro): ?>
-                    <div class="alert alert-error">⚠ <?= $erro ?></div>
-                <?php endif; ?>
-                <?php if ($sucesso): ?>
-                    <div class="alert alert-success">✔ <?= $sucesso ?></div>
-                <?php endif; ?>
+                    <form method="POST" action="dashboard.php?aba=perfil">
+                        <input type="hidden" name="acao" value="editar_perfil">
 
-                <form method="POST" action="dashboard.php?aba=perfil">
-                    <input type="hidden" name="acao" value="editar_perfil">
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Nome</label>
-                            <input type="text" name="nome" required value="<?= sanitizar($usuario['nome']) ?>">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Nome completo</label>
+                                <input class="form-control" type="text" name="nome" required
+                                       value="<?= sanitizar($usuario['nome']) ?>">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">E-mail</label>
+                                <input class="form-control" type="email" name="email" required
+                                       value="<?= sanitizar($usuario['email']) ?>">
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label>E-mail</label>
-                            <input type="email" name="email" required value="<?= sanitizar($usuario['email']) ?>">
-                        </div>
-                    </div>
 
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Nova Senha</label>
-                            <input type="password" name="senha" placeholder="Deixe vazio para não alterar">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Nova senha</label>
+                                <input class="form-control" type="password" name="senha"
+                                       placeholder="Deixe vazio para não alterar">
+                                <p class="form-hint">Mínimo 6 caracteres</p>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Confirmar nova senha</label>
+                                <input class="form-control" type="password" name="conf_senha"
+                                       placeholder="Repita a nova senha">
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label>Confirmar Senha</label>
-                            <input type="password" name="confirmar_senha" placeholder="Repita a nova senha">
+
+                        <div style="background:var(--bg-subtle); border:1px solid var(--border); border-radius:var(--radius); padding:.75rem 1rem; margin-bottom:1.25rem; font-size:.82rem; color:var(--text-3)">
+                            📅 Conta criada em: <strong style="color:var(--text-2)"><?= formatar_data($usuario['criado_em']) ?></strong>
                         </div>
-                    </div>
 
-                    <div style="font-family:'VT323',monospace; font-size:1rem; color:var(--muted); margin-bottom:1.2rem;">
-                        📅 Conta criada em: <?= formatar_data($usuario['criado_em']) ?>
-                    </div>
+                        <div class="flex gap-2 flex-wrap">
+                            <button type="submit" class="btn btn-primary">Salvar alterações</button>
+                            <a href="../admin/dashboard.php?aba=noticias" class="btn btn-ghost">Cancelar</a>
+                        </div>
+                    </form>
 
-                    <div class="flex gap-2 flex-wrap">
-                        <button type="submit" class="btn btn-primary">💾 Salvar</button>
-                        <a href="excluir_usuario.php"
-                           class="btn btn-danger"
-                           onclick="return confirm('Tem certeza? Esta ação é permanente e excluirá todas as suas notícias.')">
-                           💣 Excluir Conta
-                        </a>
-                    </div>
-                </form>
+                </div>
             </div>
 
             <?php endif; ?>
 
         </main>
     </div>
+
+</div>
 </div>
 
-<?php include 'footer.php'; ?>
-</body>
-</html>
+<?php include '../include/footer.php'; ?>

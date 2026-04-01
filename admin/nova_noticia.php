@@ -1,71 +1,94 @@
 <?php
-// nova_noticia.php — FragZone
-require_once 'verifica_login.php';
-require_once 'conexao.php';
-require_once 'funcoes.php';
+session_start();
+require_once __DIR__ . '/../include/conexao.php';
+require_once __DIR__ . '/../include/funcoes.php';
+require_once __DIR__ . '/../include/verifica_login.php';
 
-$erro = '';
+// Variável de feedback
+$mensagem = "";
+
+// Verifica se enviou o formulário
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $titulo   = sanitizar($_POST['titulo'] ?? '');
-    $conteudo = trim($_POST['noticia'] ?? '');
-    $imagem   = null;
 
-    if (!$titulo || !$conteudo) {
-        $erro = 'Título e conteúdo são obrigatórios.';
+    $titulo = trim($_POST['titulo']);
+    $noticia = trim($_POST['noticia']);
+    $categoria = $_POST['categoria'] ?? '';
+    $autor = $_SESSION['usuario_id'];
+
+    $imagemNome = null;
+
+    // Upload de imagem
+    if (!empty($_FILES['imagem']['name'])) {
+
+        $pasta = __DIR__ . '/../assets/img/';
+        $nomeArquivo = time() . "_" . basename($_FILES['imagem']['name']);
+        $caminho = $pasta . $nomeArquivo;
+
+        if (move_uploaded_file($_FILES['imagem']['tmp_name'], $caminho)) {
+            $imagemNome = $nomeArquivo;
+        } else {
+            $mensagem = "Erro ao enviar imagem!";
+        }
+    }
+
+    // Validação básica
+    if ($titulo && $noticia && $categoria) {
+
+        $stmt = $pdo->prepare("
+            INSERT INTO noticias (titulo, noticia, autor, data, imagem, categoria)
+            VALUES (?, ?, ?, NOW(), ?, ?)
+        ");
+
+        if ($stmt->execute([$titulo, $noticia, $autor, $imagemNome, $categoria])) {
+            $mensagem = "Notícia publicada com sucesso!";
+        } else {
+            $mensagem = "Erro ao salvar notícia.";
+        }
+
     } else {
-        if (!empty($_FILES['imagem']['name'])) {
-            $ext = strtolower(pathinfo($_FILES['imagem']['name'], PATHINFO_EXTENSION));
-            if (!in_array($ext, ['jpg','jpeg','png','gif','webp'])) {
-                $erro = 'Formato de imagem inválido.';
-            } elseif ($_FILES['imagem']['size'] > 5*1024*1024) {
-                $erro = 'Imagem muito grande (máx 5MB).';
-            } else {
-                $nome = uniqid('img_') . '.' . $ext;
-                if (!is_dir('imagens')) mkdir('imagens', 0755, true);
-                move_uploaded_file($_FILES['imagem']['tmp_name'], 'imagens/' . $nome);
-                $imagem = $nome;
-            }
-        }
-        if (!$erro) {
-            $stmt = $pdo->prepare("INSERT INTO noticias (titulo, noticia, autor, imagem) VALUES (?,?,?,?)");
-            $stmt->execute([$titulo, $conteudo, $_SESSION['usuario_id'], $imagem]);
-            redirecionar('dashboard.php');
-        }
+        $mensagem = "Preencha todos os campos obrigatórios!";
     }
 }
 ?>
-<!DOCTYPE html>
-<html lang="pt-br" data-theme="dark">
-<head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nova Notícia — FragZone</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
-<?php include 'header.php'; ?>
-<div class="container">
-    <div class="form-wrap wide">
-        <h2>📝 Nova Notícia</h2>
-        <?php if ($erro): ?><div class="alert alert-error">⚠ <?= $erro ?></div><?php endif; ?>
-        <form method="POST" enctype="multipart/form-data">
-            <div class="form-group">
-                <label>Título *</label>
-                <input type="text" name="titulo" placeholder="Título da notícia" required value="<?= isset($_POST['titulo']) ? sanitizar($_POST['titulo']) : '' ?>">
-            </div>
-            <div class="form-group">
-                <label>Conteúdo *</label>
-                <textarea name="noticia" placeholder="Escreva o conteúdo completo da notícia..." required style="min-height:250px"><?= isset($_POST['noticia']) ? sanitizar($_POST['noticia']) : '' ?></textarea>
-            </div>
-            <div class="form-group">
-                <label>Imagem (opcional)</label>
-                <input type="file" name="imagem" accept="image/*">
-            </div>
-            <div class="flex gap-2 flex-wrap">
-                <button type="submit" class="btn btn-primary">▶ PUBLICAR</button>
-                <a href="dashboard.php" class="btn btn-ghost">Cancelar</a>
-            </div>
-        </form>
-    </div>
+
+<?php include __DIR__ . '/../include/header.php'; ?>
+
+<div class="container container-pad">
+
+    <h2>📰 Nova Notícia</h2>
+
+    <?php if ($mensagem): ?>
+        <div class="alert">
+            <?= sanitizar($mensagem) ?>
+        </div>
+    <?php endif; ?>
+
+    <form method="POST" enctype="multipart/form-data" class="form">
+
+        <label>Título:</label>
+        <input type="text" name="titulo" required>
+
+        <label>Conteúdo:</label>
+        <textarea name="noticia" rows="6" required></textarea>
+
+        <label>Imagem:</label>
+        <input type="file" name="imagem">
+
+        <!-- ✅ CATEGORIA -->
+        <label>Categoria:</label>
+        <select name="categoria" required>
+            <option value="">Selecione uma categoria</option>
+            <option value="e-sports">E-Sports</option>
+            <option value="games">Games</option>
+            <option value="campeonatos">Campeonatos</option>
+            <option value="lancamentos">Lançamentos</option>
+            <option value="analises">Análises</option>
+        </select>
+
+        <button type="submit" class="btn btn-primary">Publicar Notícia</button>
+
+    </form>
+
 </div>
-<?php include 'footer.php'; ?>
-</body></html>
+
+<?php include __DIR__ . '/../include/footer.php'; ?>
